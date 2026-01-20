@@ -54,6 +54,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import de.syss.MifareClassicTool.Common;
@@ -94,6 +95,7 @@ public class WriteTag extends BasicActivity {
     private CheckBox mWriteManufBlock;
     private CheckBox mEnableStaticAC;
     private HashMap<Integer, HashMap<Integer, byte[]>> mDumpWithPos;
+    private HashSet<String> mKeysFromDump;
     private boolean mWriteDumpFromEditor = false;
     private String[] mDumpFromEditor;
     private EditText mVtrStageSector;
@@ -760,7 +762,7 @@ public class WriteTag extends BasicActivity {
             return;
         }
 
-        initDumpWithPosFromDump(dump);
+        initDumpWithPosAndKeysFromDump(dump);
 
         // Create and show sector chooser dialog
         // (let the user select the sectors which will be written).
@@ -818,7 +820,7 @@ public class WriteTag extends BasicActivity {
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(
                 v -> {
                     // Re-Init mDumpWithPos in order to remove unwanted sectors.
-                    initDumpWithPosFromDump(dump);
+                    initDumpWithPosAndKeysFromDump(dump);
                     for (CheckBox box : sectorBoxes) {
                         int sector = Integer.parseInt(box.getTag().toString());
                         if (!box.isChecked()) {
@@ -878,14 +880,15 @@ public class WriteTag extends BasicActivity {
     }
 
     /**
-     * Initialize {@link #mDumpWithPos} with the data from a dump.
-     * Transform the simple dump array into a structure (mDumpWithPos)
+     * Initialize {@link #mDumpWithPos} and {@link #mKeysFromDump} with the
+     * data from a dump. Transform the simple dump array into a structure (mDumpWithPos)
      * where the sector and block information are known additionally.
      * Blocks containing unknown data ("-") are dropped.
      * @param dump The dump to initialize the mDumpWithPos with.
      */
-    private void initDumpWithPosFromDump(String[] dump) {
+    private void initDumpWithPosAndKeysFromDump(String[] dump) {
         mDumpWithPos = new HashMap<>();
+        mKeysFromDump = new HashSet<>();
         int sector = 0;
         int block = 0;
         // Transform the simple dump array into a structure (mDumpWithPos)
@@ -897,27 +900,41 @@ public class WriteTag extends BasicActivity {
                 sector = Integer.parseInt(tmp[tmp.length-1]);
                 block = 0;
                 mDumpWithPos.put(sector, new HashMap<>());
-            } else if (!dump[i].contains("-")) {
-                // Use static Access Conditions for all sectors?
-                if (mEnableStaticAC.isChecked()
-                        && (i+1 == dump.length || dump[i+1].startsWith("+"))) {
-                    // This is a Sector Trailer. Replace its ACs
-                    // with the static ones.
-                    String newBlock = dump[i].substring(0, 12)
+            } else {
+                if (i + 1 == dump.length || dump[i + 1].startsWith("+")) {
+                    // Is sector trailer. Get keys
+                    String keyA = dump[i].substring(0, 12);
+                    String keyB = dump[i].substring(20);
+                    if (!keyA.contains("-")) {
+                        mKeysFromDump.add(keyA);
+                    }
+                    if (!keyB.contains("-")) {
+                        mKeysFromDump.add(keyB);
+                    }
+                }
+                if (!dump[i].contains("-")) {
+                    // Use static Access Conditions for all sectors?
+                    if (mEnableStaticAC.isChecked()
+                        && (i + 1 == dump.length || dump[i + 1].startsWith("+"))) {
+                        // This is a Sector Trailer. Replace its ACs
+                        // with the static ones.
+                        String newBlock = dump[i].substring(0, 12)
                             + mStaticAC.getText().toString()
                             + dump[i].substring(18);
-                    dump[i] = newBlock;
-                }
-                mDumpWithPos.get(sector).put(block++,
+                        dump[i] = newBlock;
+                    }
+                    mDumpWithPos.get(sector).put(block++,
                         Common.hex2Bytes(dump[i]));
-            } else {
-                block++;
+                } else {
+                    block++;
+                }
             }
         }
     }
 
     /**
      * Create a key map for the dump ({@link #mDumpWithPos}).
+     * Also creates a temporary key file with keys from the dump to be used during mapping.
      * @see KeyMapCreator
      */
     private void createKeyMapForDump() {
@@ -932,7 +949,25 @@ public class WriteTag extends BasicActivity {
                 (int) Collections.max(mDumpWithPos.keySet()));
         intent.putExtra(KeyMapCreator.EXTRA_BUTTON_TEXT,
                 getString(R.string.action_create_key_map_and_write_dump));
+        saveKeysFromDumpToTempKeyFile();
+        intent.putExtra(KeyMapCreator.EXTRA_USE_KEYS_FROM_DUMP, true);
         startActivityForResult(intent, CKM_WRITE_DUMP);
+    }
+
+    /**
+     * Save keys from dump to be written in a temporary key file which then can be used
+     * by the {@link KeyMapCreator} as additional resource.
+     */
+    private void saveKeysFromDumpToTempKeyFile() {
+        if (mKeysFromDump == null || mKeysFromDump.isEmpty()) {
+            return;
+        }
+        String[] keys = mKeysFromDump.toArray(new String[0]);
+        File file = Common.getFile(Common.TMP_DIR + "/keys_from_dump.keys");
+        if (!Common.saveFile(file, keys, false)) {
+            Toast.makeText(this, R.string.info_save_error,
+                Toast.LENGTH_LONG).show();
+        }
     }
 
     /**
@@ -940,7 +975,7 @@ public class WriteTag extends BasicActivity {
      * This is done in four steps. The first check determines if the dump
      * fits on the tag (size check). The second check determines if the keys for
      * relevant sectors are known (key check). The third check determines if
-     * specail blocks (block 0 and sector trailers) are correct. At last this
+     * special blocks (block 0 and sector trailers) are correct. At last this
      * method will check whether the keys with write privileges are known and if
      * some blocks are read-only (write check).<br />
      * If some of these checks "fail", the user will get a report dialog

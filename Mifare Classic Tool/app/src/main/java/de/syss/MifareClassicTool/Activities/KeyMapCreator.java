@@ -114,6 +114,12 @@ public class KeyMapCreator extends BasicActivity {
     public final static String EXTRA_BUTTON_TEXT =
             "de.syss.MifareClassicTool.Activity.BUTTON_TEXT";
 
+    /**
+     * True if the keys from the dump should be used (stored at tmp/keys_from_dump.keys). Optional.
+     */
+    public final static String EXTRA_USE_KEYS_FROM_DUMP =
+            "de.syss.MifareClassicTool.Activity.USE_KEYS_FROM_DUMP";
+
     // Output parameters.
     // For later use.
 //    public final static String EXTRA_KEY_MAP =
@@ -142,6 +148,7 @@ public class KeyMapCreator extends BasicActivity {
     private File mKeyDirPath;
     private int mFirstSector;
     private int mLastSector;
+    private boolean mUseKeysFromDump;
     private MCReader currentReader;
 
     /**
@@ -207,6 +214,11 @@ public class KeyMapCreator extends BasicActivity {
         if (intent.hasExtra(EXTRA_BUTTON_TEXT)) {
             ((Button) findViewById(R.id.buttonCreateKeyMap)).setText(
                     intent.getStringExtra(EXTRA_BUTTON_TEXT));
+        }
+
+        // Use keys from dump?
+        if (intent.hasExtra(EXTRA_USE_KEYS_FROM_DUMP)) {
+            mUseKeysFromDump = intent.getBooleanExtra(EXTRA_USE_KEYS_FROM_DUMP, false);
         }
     }
 
@@ -405,6 +417,13 @@ public class KeyMapCreator extends BasicActivity {
                 }
 
                 // Set key files.
+                if (mUseKeysFromDump) {
+                    // Add keys from dump to be written at the beginning because it is likely
+                    // that the dump is written back to the same tag.
+                    File tmpKeysFromDump = new File(
+                        Common.getFile(Common.TMP_DIR).getAbsolutePath(), "keys_from_dump.keys");
+                    keyFiles.add(0, tmpKeysFromDump);
+                }
                 File[] keys = keyFiles.toArray(new File[0]);
                 int numberOfLoadedKeys = reader.setKeyFile(keys, this);
                 if (numberOfLoadedKeys < 1) {
